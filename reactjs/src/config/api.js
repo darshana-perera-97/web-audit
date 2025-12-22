@@ -1,7 +1,8 @@
 // Backend API Configuration
 // When hosted on the same server, use relative paths
 // For development, you can use absolute URL: 'http://localhost:5500'
-const API_BASE_URL = 'http://localhost:5500';
+const API_BASE_URL = 'https://smartclass.nexgenai.asia/';
+// const API_BASE_URL = 'http://localhost:5500';
 
 export const API_ENDPOINTS = {
   BASE_URL: API_BASE_URL,
