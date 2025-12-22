@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Toaster } from './components/ui/sonner';
 import { Navbar } from './components/Navbar';
 
@@ -20,6 +21,11 @@ function AppContent() {
   const location = useLocation();
   const hideNavbarPaths = ['/login', '/register'];
   const showNavbar = !hideNavbarPaths.includes(location.pathname);
+
+  // Scroll to top on route change
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
 
   return (
     <div className="min-h-screen">

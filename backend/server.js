@@ -2,6 +2,9 @@ const express = require('express');
 const cors = require('cors');
 const https = require('https');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 require('dotenv').config();
 
 const app = express();
@@ -12,14 +15,11 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'SitePulse API Server is running!',
-    version: '1.0.0',
-    status: 'active'
-  });
-});
+// Path to React build folder
+const buildPath = path.join(__dirname, '..', 'reactjs', 'build');
+
+// API Routes (must be defined before static file serving)
+// Note: All API routes are prefixed with /api
 
 app.get('/api/health', (req, res) => {
   res.json({ 
@@ -490,6 +490,77 @@ app.get('/api/check-broken-links', async (req, res) => {
   }
 });
 
+// Ensure data/reports directory exists
+const reportsDir = path.join(__dirname, 'data', 'reports');
+if (!fs.existsSync(reportsDir)) {
+  fs.mkdirSync(reportsDir, { recursive: true });
+}
+
+// API endpoint to save report
+app.post('/api/reports', async (req, res) => {
+  try {
+    const reportData = req.body;
+    
+    if (!reportData) {
+      return res.status(400).json({ 
+        error: 'Report data is required' 
+      });
+    }
+
+    // Generate unique report ID
+    const reportId = uuidv4();
+    reportData.reportId = reportId;
+    reportData.createdAt = new Date().toISOString();
+
+    // Save report as JSON file
+    const filePath = path.join(reportsDir, `${reportId}.json`);
+    fs.writeFileSync(filePath, JSON.stringify(reportData, null, 2), 'utf8');
+
+    // Note: The frontend will construct the full URL
+    res.json({
+      success: true,
+      reportId: reportId,
+      message: 'Report saved successfully'
+    });
+  } catch (error) {
+    console.error('Error saving report:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to save report',
+      message: error.message
+    });
+  }
+});
+
+// API endpoint to get report by ID
+app.get('/api/reports/:reportId', (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const filePath = path.join(reportsDir, `${reportId}.json`);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        error: 'Report not found'
+      });
+    }
+
+    const reportData = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    
+    res.json({
+      success: true,
+      data: reportData
+    });
+  } catch (error) {
+    console.error('Error retrieving report:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to retrieve report',
+      message: error.message
+    });
+  }
+});
+
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
@@ -499,12 +570,37 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({ 
-    error: 'Route not found' 
+// Serve static files from React build folder (CSS, JS, images, etc.)
+// This must come after API routes but before the catch-all route
+if (fs.existsSync(buildPath)) {
+  app.use(express.static(buildPath));
+}
+
+// Serve React app for all non-API routes (client-side routing)
+// This must be the last route handler
+if (fs.existsSync(buildPath)) {
+  app.get('*', (req, res) => {
+    // Don't serve React app for API routes
+    if (req.path.startsWith('/api')) {
+      return res.status(404).json({ 
+        error: 'Route not found' 
+      });
+    }
+    // Serve React app's index.html for all other routes
+    res.sendFile(path.join(buildPath, 'index.html'));
   });
-});
+} else {
+  // 404 handler if build folder doesn't exist
+  app.use((req, res) => {
+    if (req.path.startsWith('/api')) {
+      res.status(404).json({ 
+        error: 'Route not found' 
+      });
+    } else {
+      res.status(404).send('React build folder not found. Please run "npm run build" in the reactjs directory.');
+    }
+  });
+}
 
 // Start server
 app.listen(PORT, () => {

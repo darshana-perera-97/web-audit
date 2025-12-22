@@ -1,4 +1,5 @@
 import { BrowserRouter, Switch, Route, useLocation } from 'react-router-dom';
+import { useEffect } from 'react';
 import { Toaster } from './app/components/ui/sonner';
 import { Navbar } from './app/components/Navbar';
 import { Footer } from './app/components/Footer';
@@ -11,6 +12,7 @@ import { Preview } from './app/pages/Preview';
 import { Analytics } from './app/pages/Analytics';
 import { Results } from './app/pages/Results';
 import { History } from './app/pages/History';
+import { Report } from './app/pages/Report';
 import { Compare } from './app/pages/Compare';
 import { Login } from './app/pages/Login';
 import { Register } from './app/pages/Register';
@@ -24,6 +26,11 @@ function AppContent() {
   const hideNavbarPaths = ['/login', '/register'];
   const showNavbar = !hideNavbarPaths.includes(location.pathname);
 
+  // Scroll to top on route change
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [location.pathname]);
+
   return (
     <div className="min-h-screen flex flex-col">
       {showNavbar && <Navbar />}
@@ -36,6 +43,7 @@ function AppContent() {
           <Route path="/analytics" component={Analytics} />
           <Route path="/results" component={Results} />
           <Route path="/history" component={History} />
+          <Route path="/report/:reportId" component={Report} />
           <Route path="/compare" component={Compare} />
           <Route path="/login" component={Login} />
           <Route path="/register" component={Register} />

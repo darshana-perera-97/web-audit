@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useHistory, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Activity, FileText, Globe, CheckCircle, ExternalLink, ChevronLeft, ChevronRight, BarChart3, Sparkles, MessageSquare, TrendingUp, AlertCircle, Link2, AlertTriangle, Download } from 'lucide-react';
+import { Activity, FileText, Globe, CheckCircle, ExternalLink, ChevronLeft, ChevronRight, BarChart3, Sparkles, MessageSquare, TrendingUp, AlertCircle, Link2, AlertTriangle, Download, Share2, X, Copy, Check, Shield } from 'lucide-react';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { SecondaryButton } from '../components/SecondaryButton';
 import { MetricCard } from '../components/MetricCard';
+import { API_ENDPOINTS } from '../../config/api';
 
 export function Analytics() {
   const history = useHistory();
@@ -29,6 +30,11 @@ export function Analytics() {
   const [loadingLinks, setLoadingLinks] = useState(false);
   const [brokenLinksData, setBrokenLinksData] = useState(null);
   const [loadingBrokenLinks, setLoadingBrokenLinks] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
+  const [reportId, setReportId] = useState(null);
+  const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   const normalizeUrl = (inputUrl) => {
     if (!inputUrl) return '';
@@ -37,6 +43,57 @@ export function Analytics() {
       normalized = 'https://' + normalized;
     }
     return normalized;
+  };
+
+  // Calculate Domain Authority based on real metrics
+  // Only calculate when we have link data (the most important factor)
+  const calculateDomainAuthority = () => {
+    // Don't calculate if we don't have link data yet
+    if (!linksData || linksData.externalLinks === undefined) {
+      return null; // Return null to indicate data not ready
+    }
+
+    // Base score starts from 0-100
+    let daScore = 0;
+
+    // Factor 1: External Links (Backlinks) - 40% weight
+    // More external links = higher authority
+    const externalLinks = linksData.externalLinks || 0;
+    // Logarithmic scale: 0 links = 0, 100+ links = 40 points
+    // Using log10 for realistic scaling (1 link = ~10pts, 10 links = ~20pts, 100 links = ~30pts, 1000 links = ~40pts)
+    const linkScore = Math.min(40, Math.log10(externalLinks + 1) * 13.33);
+    daScore += linkScore;
+
+    // Factor 2: Internal Links (Site Structure) - 15% weight
+    // Good internal linking shows well-structured site
+    const internalLinks = linksData.internalLinks || 0;
+    // 0-50 internal links = 0-15 points
+    const internalScore = Math.min(15, (internalLinks / 50) * 15);
+    daScore += internalScore;
+
+    // Factor 3: SEO Score - 20% weight
+    // Technical SEO quality
+    if (results.seo !== undefined && results.seo > 0) {
+      const seoScore = (results.seo / 100) * 20;
+      daScore += seoScore;
+    }
+
+    // Factor 4: Performance Score - 15% weight
+    // Site quality and user experience
+    if (results.performance !== undefined && results.performance > 0) {
+      const perfScore = (results.performance / 100) * 15;
+      daScore += perfScore;
+    }
+
+    // Factor 5: Security & Best Practices - 10% weight
+    // HTTPS and security practices
+    if (results.bestPractices !== undefined && results.bestPractices > 0) {
+      const securityScore = (results.bestPractices / 100) * 10;
+      daScore += securityScore;
+    }
+
+    // Round to nearest integer and ensure it's between 0-100
+    return Math.min(100, Math.max(0, Math.round(daScore)));
   };
 
   useEffect(() => {
@@ -58,10 +115,9 @@ export function Analytics() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [currentPage]);
 
-  // Function to download full report
-  const downloadFullReport = () => {
-    // Compile all data from all pages
-    const reportData = {
+  // Function to compile report data
+  const compileReportData = () => {
+    return {
       websiteUrl: url,
       auditDate: new Date().toISOString(),
       formData: formData,
@@ -90,6 +146,30 @@ export function Analytics() {
           const pageSpeedScore = results.performance >= 80 ? 100 : results.performance >= 50 ? 60 : 30;
           const httpsScore = results.bestPractices >= 80 ? 100 : 0;
           return Math.round((metaTagsScore + structuredDataScore + mobileFriendlyScore + pageSpeedScore + httpsScore) / 5);
+        })(),
+        domainAuthority: (() => {
+          // Calculate Domain Authority
+          let daScore = 0;
+          if (linksData && linksData.externalLinks) {
+            const externalLinks = linksData.externalLinks;
+            const linkScore = Math.min(40, Math.log10(externalLinks + 1) * 10);
+            daScore += linkScore;
+          }
+          if (linksData && linksData.internalLinks) {
+            const internalLinks = linksData.internalLinks;
+            const internalScore = Math.min(15, (internalLinks / 50) * 15);
+            daScore += internalScore;
+          }
+          if (results.seo !== undefined) {
+            daScore += (results.seo / 100) * 20;
+          }
+          if (results.performance !== undefined) {
+            daScore += (results.performance / 100) * 15;
+          }
+          if (results.bestPractices !== undefined) {
+            daScore += (results.bestPractices / 100) * 10;
+          }
+          return Math.min(100, Math.max(0, Math.round(daScore)));
         })(),
         seoScore: results.seo,
         performanceScore: results.performance,
@@ -132,18 +212,49 @@ export function Analytics() {
         brokenLinks: brokenLinksData.brokenLinks || []
       } : null
     };
+  };
 
-    // Create downloadable content
-    const reportContent = JSON.stringify(reportData, null, 2);
-    const blob = new Blob([reportContent], { type: 'application/json' });
-    const url_blob = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url_blob;
-    link.download = `website-audit-report-${url.replace(/https?:\/\//, '').replace(/\//g, '-')}-${new Date().toISOString().split('T')[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url_blob);
+  // Function to share report
+  const shareReport = async () => {
+    setSaving(true);
+    try {
+      const reportData = compileReportData();
+      
+      // Save report to backend
+      const response = await fetch(API_ENDPOINTS.REPORTS, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(reportData),
+      });
+
+      const result = await response.json();
+      
+      if (result.success) {
+        // Generate shareable URL
+        const baseUrl = window.location.origin;
+        const shareableUrl = `${baseUrl}/report/${result.reportId}`;
+        setShareUrl(shareableUrl);
+        setReportId(result.reportId);
+        setShowShareModal(true);
+      } else {
+        alert('Failed to save report. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error sharing report:', error);
+      alert('Failed to share report. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Function to copy link to clipboard
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
   };
 
   // Auto-fetch content analysis when on Customer Review page
@@ -152,7 +263,7 @@ export function Analytics() {
       const fetchContentAnalysis = async () => {
         setLoadingContent(true);
         try {
-          const response = await fetch(`http://localhost:5500/api/analyze-content?url=${encodeURIComponent(url)}`);
+          const response = await fetch(`${API_ENDPOINTS.ANALYZE_CONTENT}?url=${encodeURIComponent(url)}`);
           const data = await response.json();
           if (data.success) {
             setContentAnalysis(data.data);
@@ -167,13 +278,14 @@ export function Analytics() {
     }
   }, [currentPage, url, contentAnalysis, loadingContent]);
 
-  // Auto-fetch links when on Link List page
+  // Auto-fetch links when on SEO Analytics page (page 3) or Link List page (page 5)
+  // This ensures Domain Authority can be calculated with real link data
   useEffect(() => {
-    if (currentPage === 5 && url && !linksData && !loadingLinks) {
+    if ((currentPage === 3 || currentPage === 5) && url && !linksData && !loadingLinks) {
       const fetchLinks = async () => {
         setLoadingLinks(true);
         try {
-          const response = await fetch(`http://localhost:5500/api/extract-links?url=${encodeURIComponent(url)}`);
+          const response = await fetch(`${API_ENDPOINTS.EXTRACT_LINKS}?url=${encodeURIComponent(url)}`);
           const data = await response.json();
           if (data.success) {
             setLinksData(data.data);
@@ -194,7 +306,7 @@ export function Analytics() {
       const fetchBrokenLinks = async () => {
         setLoadingBrokenLinks(true);
         try {
-          const response = await fetch(`http://localhost:5500/api/check-broken-links?url=${encodeURIComponent(url)}`);
+          const response = await fetch(`${API_ENDPOINTS.CHECK_BROKEN_LINKS}?url=${encodeURIComponent(url)}`);
           const data = await response.json();
           if (data.success) {
             setBrokenLinksData(data.data);
@@ -234,7 +346,7 @@ export function Analytics() {
 
     try {
       // Fetch real data from backend
-      const response = await fetch(`http://localhost:5500/api/analyze?url=${encodeURIComponent(url)}`);
+      const response = await fetch(`${API_ENDPOINTS.ANALYZE}?url=${encodeURIComponent(url)}`);
       const data = await response.json();
       
       if (data.success && data.data) {
@@ -532,6 +644,48 @@ export function Analytics() {
 
                     {/* SEO Metrics Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                      {/* Domain Authority - Hidden for now */}
+                      {/* <div className="p-6 rounded-[24px] bg-gradient-to-br from-purple-50 to-indigo-50 border-2 border-purple-200 shadow-[0_20px_40px_rgba(0,0,0,0.1)]">
+                        <div className="flex items-center gap-3 mb-4">
+                          <Shield className="w-8 h-8 text-purple-600" />
+                          <h4 className="text-lg font-semibold text-[#1A1F36]">Domain Authority</h4>
+                        </div>
+                        {(() => {
+                          const domainAuthority = calculateDomainAuthority();
+                          if (domainAuthority === null) {
+                            return (
+                              <>
+                                <div className="text-4xl font-bold text-purple-600 mb-2">--</div>
+                                <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
+                                  <div className="h-full bg-gray-300 rounded-full" style={{ width: '0%' }} />
+                                </div>
+                                <p className="text-xs text-[#6B7280]">
+                                  {loadingLinks ? 'Analyzing links...' : 'Navigate to Link List page to calculate'}
+                                </p>
+                                <p className="text-xs text-purple-600 mt-1 font-medium">Requires link analysis data</p>
+                              </>
+                            );
+                          }
+                          return (
+                            <>
+                              <div className="text-4xl font-bold text-purple-600 mb-2">{domainAuthority}/100</div>
+                              <div className="w-full h-2 bg-gray-200 rounded-full overflow-hidden mb-2">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    domainAuthority >= 70 ? 'bg-purple-600' : domainAuthority >= 40 ? 'bg-purple-400' : 'bg-purple-300'
+                                  }`}
+                                  style={{ width: `${domainAuthority}%` }}
+                                />
+                              </div>
+                              <p className="text-xs text-[#6B7280]">
+                                {linksData ? `${linksData.externalLinks || 0} backlinks, ${linksData.internalLinks || 0} internal` : 'Calculating...'}
+                              </p>
+                              <p className="text-xs text-purple-600 mt-1 font-medium">Based on link profile & site quality</p>
+                            </>
+                          );
+                        })()}
+                      </div> */}
+
                       <div className="p-6 rounded-[24px] bg-white border border-gray-100 shadow-[0_20px_40px_rgba(0,0,0,0.1)]">
                         <div className="flex items-center gap-3 mb-4">
                           <Globe className="w-8 h-8 text-[#10B981]" />
@@ -1163,14 +1317,84 @@ export function Analytics() {
                 </PrimaryButton>
               ) : (
                 <PrimaryButton
-                  onClick={downloadFullReport}
+                  onClick={shareReport}
+                  disabled={saving}
                   className="flex items-center gap-2"
                 >
-                  Download Full Report
-                  <Download className="w-4 h-4" />
+                  {saving ? 'Saving...' : 'Share Report'}
+                  <Share2 className="w-4 h-4" />
                 </PrimaryButton>
               )}
             </div>
+          </motion.div>
+        )}
+
+        {/* Share Report Modal */}
+        {showShareModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            onClick={() => setShowShareModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-white rounded-[24px] p-8 max-w-md w-full shadow-2xl"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-semibold text-[#1A1F36]">Share Report</h2>
+                <button
+                  onClick={() => setShowShareModal(false)}
+                  className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+                >
+                  <X className="w-5 h-5 text-[#6B7280]" />
+                </button>
+              </div>
+              
+              <div className="space-y-4">
+                <p className="text-[#6B7280]">
+                  Your report has been saved! Share this link with others to view the report.
+                </p>
+                
+                <div className="flex items-center gap-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                  <input
+                    type="text"
+                    value={shareUrl}
+                    readOnly
+                    className="flex-1 bg-transparent text-sm text-[#1A1F36] outline-none"
+                  />
+                  <button
+                    onClick={copyToClipboard}
+                    className="p-2 rounded-lg hover:bg-gray-200 transition-colors"
+                    title="Copy to clipboard"
+                  >
+                    {copied ? (
+                      <Check className="w-5 h-5 text-[#10B981]" />
+                    ) : (
+                      <Copy className="w-5 h-5 text-[#6B7280]" />
+                    )}
+                  </button>
+                </div>
+                
+                <div className="flex gap-3">
+                  <PrimaryButton
+                    onClick={() => window.open(shareUrl, '_blank')}
+                    className="flex-1 flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    View Report
+                  </PrimaryButton>
+                  <SecondaryButton
+                    onClick={() => setShowShareModal(false)}
+                    className="flex-1"
+                  >
+                    Close
+                  </SecondaryButton>
+                </div>
+              </div>
+            </motion.div>
           </motion.div>
         )}
       </div>

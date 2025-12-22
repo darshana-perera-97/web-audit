@@ -1,6 +1,6 @@
-# SitePulse Backend Server
+# Web Audit Backend Server
 
-Backend API server for the SitePulse web audit application.
+Backend server for the SitePulse web audit application.
 
 ## Setup
 
@@ -9,72 +9,53 @@ Backend API server for the SitePulse web audit application.
 npm install
 ```
 
-2. Create a `.env` file in the `backend` folder:
-   - **Option 1:** Copy the sample file:
-     - On Windows: `copy env.example .env`
-     - On Mac/Linux: `cp env.example .env`
-   - **Option 2:** Manually create `.env` with the following content:
-     ```
-     PORT=5500
-     NODE_ENV=development
-     GOOGLE_PAGESPEED_API_KEY=your_api_key_here
-     ```
-
-**Getting a Google PageSpeed Insights API Key (Optional):**
-The system works with simulated data by default. To get real performance data:
-
-1. **Get a free API key:**
-   - Visit: https://console.cloud.google.com/
-   - Create a new project (or select an existing one)
-   - Enable the "PageSpeed Insights API" in the API Library
-   - Go to "Credentials" → "Create Credentials" → "API Key"
-   - Copy your API key
-
-2. **Add to `.env` file:**
-   - Open `backend/.env` file
-   - Replace `your_api_key_here` with your actual API key:
-     ```
-     GOOGLE_PAGESPEED_API_KEY=AIzaSyYourActualKeyHere
-     ```
-
-3. **Restart the server:**
-   ```bash
-   npm start
-   ```
-
-**Note:** Without an API key, the system will use simulated data (this is not an error - it's a fallback feature).
-
-3. Start the server:
+2. Create a `.env` file (copy from `env.example`):
 ```bash
-# Development mode (with auto-reload)
-npm run dev
+cp env.example .env
+```
 
-# Production mode
+3. Build the React frontend:
+```bash
+cd ../reactjs
+npm install
+npm run build
+cd ../backend
+```
+
+4. Start the server:
+```bash
 npm start
 ```
 
-## API Endpoints
-
-### Health Check
-- `GET /api/health` - Check server health status
-
-### Website Analysis
-- `GET /api/analyze?url=<website-url>` - Analyze a website
-
-## Example Usage
-
+For development with auto-reload:
 ```bash
-# Health check
-curl http://localhost:5500/api/health
-
-# Analyze website
-curl http://localhost:5500/api/analyze?url=https://example.com
+npm run dev
 ```
 
-## Development
+## Server Configuration
 
-The server uses:
-- **Express.js** - Web framework
-- **CORS** - Cross-origin resource sharing
-- **dotenv** - Environment variables
-- **nodemon** - Auto-reload in development
+The server runs on `http://localhost:5500` by default (configurable via `PORT` environment variable).
+
+## Serving React App
+
+The backend server automatically serves the React build folder. The React app will be available at the root URL (`http://localhost:5500/`), and all API endpoints are available at `/api/*`.
+
+### Route Structure:
+- `/api/*` - All API endpoints
+- `/*` - React app (served from `reactjs/build` folder)
+
+## API Endpoints
+
+- `GET /api/health` - Health check
+- `GET /api/analyze?url=<website_url>` - Analyze a website
+- `GET /api/analyze-content?url=<website_url>` - Analyze website content
+- `GET /api/extract-links?url=<website_url>` - Extract links from website
+- `GET /api/check-broken-links?url=<website_url>` - Check for broken links
+- `POST /api/reports` - Save a report
+- `GET /api/reports/:reportId` - Get a report by ID
+
+## Notes
+
+- The React build folder must exist at `../reactjs/build` for the app to be served
+- If the build folder doesn't exist, only API endpoints will work
+- All API routes are prefixed with `/api` to avoid conflicts with React Router
