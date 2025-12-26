@@ -14,6 +14,13 @@ npm install
 cp env.example .env
 ```
 
+   Then edit `.env` and configure:
+   - **SMTP settings** (required for email notifications)
+   - **Google PageSpeed API key** (optional, for real performance data)
+   - **OpenAI API key** (optional, for AI content analysis)
+   
+   See `env.example` for detailed configuration instructions.
+
 3. Build the React frontend:
 ```bash
 cd ../reactjs
@@ -53,9 +60,22 @@ The backend server automatically serves the React build folder. The React app wi
 - `GET /api/check-broken-links?url=<website_url>` - Check for broken links
 - `POST /api/reports` - Save a report
 - `GET /api/reports/:reportId` - Get a report by ID
+- `POST /api/send-email` - Send email notification to user
+
+## Environment Variables
+
+All configuration is done through the `.env` file. Key variables:
+
+- **SMTP_*** - Email service configuration (required for email notifications)
+- **GOOGLE_PAGESPEED_API_KEY** - For real performance metrics (optional)
+- **OPENAI_API_KEY** - For AI content analysis (optional)
+- **PORT** - Server port (default: 5500)
+
+See `env.example` for complete documentation and examples.
 
 ## Notes
 
 - The React build folder must exist at `../reactjs/build` for the app to be served
 - If the build folder doesn't exist, only API endpoints will work
 - All API routes are prefixed with `/api` to avoid conflicts with React Router
+- Email service is optional - app works without it, but won't send notifications

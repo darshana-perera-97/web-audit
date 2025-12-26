@@ -3,6 +3,7 @@ import { useHistory, useLocation } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { ExternalLink, X, Mail, User, Building, Phone, Globe } from 'lucide-react';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { API_ENDPOINTS } from '../../config/api';
 
 export function Preview() {
   const history = useHistory();
@@ -18,6 +19,7 @@ export function Preview() {
     company: '',
     phone: ''
   });
+  const [sendingEmail, setSendingEmail] = useState(false);
 
   useEffect(() => {
     if (url) {
@@ -62,18 +64,42 @@ export function Preview() {
     return normalized;
   };
 
-  const handleFormSubmit = (e) => {
+  const handleFormSubmit = async (e) => {
     e.preventDefault();
-    setShowFormModal(false);
+    setSendingEmail(true);
     
-    // Navigate to analytics page with URL and form data
-    history.push({
-      pathname: '/analytics',
-      state: { 
-        url: previewUrl,
-        formData: formData
-      }
-    });
+    try {
+      // Send contact details to company email for follow-ups
+      await fetch(API_ENDPOINTS.SEND_CONTACT_NOTIFICATION, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: formData.name,
+          email: formData.email,
+          company: formData.company || '',
+          phone: formData.phone || '',
+          websiteUrl: previewUrl,
+        }),
+      });
+    } catch (error) {
+      console.error('Error sending contact notification to company:', error);
+      // Continue even if company notification fails
+    } finally {
+      setSendingEmail(false);
+      setShowFormModal(false);
+      
+      // Navigate to analytics page with URL and form data
+      // Email with report link will be sent automatically when analysis completes
+      history.push({
+        pathname: '/analytics',
+        state: { 
+          url: previewUrl,
+          formData: formData
+        }
+      });
+    }
   };
 
   const handleInputChange = (e) => {
@@ -258,16 +284,23 @@ export function Preview() {
                   </div>
                 </div>
 
+                {sendingEmail && (
+                  <div className="mt-4 p-3 bg-[#10B981]/10 border border-[#10B981]/20 rounded-lg">
+                    <p className="text-sm text-[#10B981] text-center">Sending email notification...</p>
+                  </div>
+                )}
+
                 <div className="flex gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => setShowFormModal(false)}
-                    className="flex-1 px-6 py-3 rounded-[12px] border-2 border-gray-200 text-[#1A1F36] hover:bg-gray-50 transition-colors"
+                    disabled={sendingEmail}
+                    className="flex-1 px-6 py-3 rounded-[12px] border-2 border-gray-200 text-[#1A1F36] hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Cancel
                   </button>
-                  <PrimaryButton type="submit" className="flex-1">
-                    Start Analysis
+                  <PrimaryButton type="submit" className="flex-1" disabled={sendingEmail}>
+                    {sendingEmail ? 'Processing...' : 'Start Analysis'}
                   </PrimaryButton>
                 </div>
               </form>

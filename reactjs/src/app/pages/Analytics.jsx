@@ -35,6 +35,7 @@ export function Analytics() {
   const [reportId, setReportId] = useState(null);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [emailSent, setEmailSent] = useState(false);
 
   const normalizeUrl = (inputUrl) => {
     if (!inputUrl) return '';
@@ -238,6 +239,59 @@ export function Analytics() {
         setShareUrl(shareableUrl);
         setReportId(result.reportId);
         setShowShareModal(true);
+
+        // Send email with report link and analysis data for AI suggestions
+        if (formData && formData.email) {
+          try {
+            await fetch(API_ENDPOINTS.SEND_EMAIL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                to: formData.email,
+                name: formData.name || 'User',
+                websiteUrl: url,
+                reportUrl: shareableUrl,
+                analysisData: {
+                  performance: results.performance,
+                  accessibility: results.accessibility,
+                  seo: results.seo,
+                  bestPractices: results.bestPractices,
+                  performanceScore: results.performance,
+                  accessibilityScore: results.accessibility,
+                  seoScore: results.seo,
+                  bestPracticesScore: results.bestPractices,
+                },
+              }),
+            });
+          } catch (error) {
+            console.error('Error sending email:', error);
+            // Don't show error to user, email is optional
+          }
+        }
+
+        // Also send contact notification to company when report is shared
+        if (formData) {
+          try {
+            await fetch(API_ENDPOINTS.SEND_CONTACT_NOTIFICATION, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                name: formData.name || 'User',
+                email: formData.email || '',
+                company: formData.company || '',
+                phone: formData.phone || '',
+                websiteUrl: url,
+              }),
+            });
+          } catch (error) {
+            console.error('Error sending contact notification to company:', error);
+            // Don't show error to user
+          }
+        }
       } else {
         alert('Failed to save report. Please try again.');
       }
@@ -378,6 +432,68 @@ export function Analytics() {
       clearInterval(progressInterval);
     }
   };
+
+  // Auto-generate report and send email when analysis completes
+  useEffect(() => {
+    if (!analyzing && formData && formData.email && results.performance > 0 && !emailSent) {
+      // Wait a bit for state to settle, then generate report
+      const timer = setTimeout(async () => {
+        try {
+          const reportData = compileReportData();
+          
+          // Save report to backend
+          const reportResponse = await fetch(API_ENDPOINTS.REPORTS, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(reportData),
+          });
+
+          const reportResult = await reportResponse.json();
+          
+          if (reportResult.success) {
+            // Generate shareable URL
+            const baseUrl = window.location.origin;
+            const shareableUrl = `${baseUrl}/report/${reportResult.reportId}`;
+            
+            // Send email with report link and AI suggestions
+            try {
+              await fetch(API_ENDPOINTS.SEND_EMAIL, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  to: formData.email,
+                  name: formData.name || 'User',
+                  websiteUrl: url,
+                  reportUrl: shareableUrl,
+                  analysisData: {
+                    performance: results.performance,
+                    accessibility: results.accessibility,
+                    seo: results.seo,
+                    bestPractices: results.bestPractices,
+                    performanceScore: results.performance,
+                    accessibilityScore: results.accessibility,
+                    seoScore: results.seo,
+                    bestPracticesScore: results.bestPractices,
+                  },
+                }),
+              });
+              setEmailSent(true); // Mark as sent to prevent duplicate emails
+            } catch (error) {
+              console.error('Error sending email:', error);
+            }
+          }
+        } catch (error) {
+          console.error('Error generating report:', error);
+        }
+      }, 3000); // Wait 3 seconds after analysis completes
+
+      return () => clearTimeout(timer);
+    }
+  }, [analyzing, formData, results.performance, url, emailSent]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-white via-gray-50 to-white pt-24 pb-16 px-6">
@@ -902,7 +1018,7 @@ export function Analytics() {
                           <Sparkles className="w-6 h-6" />
                           Website Summary
                         </h4>
-                        <p className="text-white/90 leading-relaxed text-lg">{contentAnalysis.summary}</p>
+                        <p className="text-white/90 leading-relaxed text-lg">{String(contentAnalysis.summary || '')}</p>
                       </div>
                     </div>
 
@@ -917,15 +1033,15 @@ export function Analytics() {
                         <div className="space-y-3">
                           <div>
                             <span className="text-sm text-[#6B7280] block mb-1">Site Title</span>
-                            <p className="font-semibold text-[#1A1F36]">{contentAnalysis.siteTitle}</p>
+                            <p className="font-semibold text-[#1A1F36]">{String(contentAnalysis.siteTitle || '')}</p>
                           </div>
                           <div>
                             <span className="text-sm text-[#6B7280] block mb-1">Website Purpose</span>
-                            <p className="text-[#1A1F36]">{contentAnalysis.websitePurpose}</p>
+                            <p className="text-[#1A1F36]">{String(contentAnalysis.websitePurpose || '')}</p>
                           </div>
                           <div>
                             <span className="text-sm text-[#6B7280] block mb-1">Main Idea</span>
-                            <p className="text-[#1A1F36]">{contentAnalysis.mainIdea}</p>
+                            <p className="text-[#1A1F36]">{String(contentAnalysis.mainIdea || '')}</p>
                           </div>
                         </div>
                       </div>
@@ -962,7 +1078,7 @@ export function Analytics() {
                                     key={index}
                                     className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-sm font-medium"
                                   >
-                                    {keyword}
+                                    {String(keyword)}
                                   </span>
                                 ))
                               ) : (
@@ -980,28 +1096,40 @@ export function Analytics() {
                         <MessageSquare className="w-6 h-6 text-[#10B981]" />
                         Detailed Content Analysis
                       </h4>
-                      <p className="text-[#6B7280] leading-relaxed">{contentAnalysis.contentAnalysis}</p>
+                      <p className="text-[#6B7280] leading-relaxed">{String(contentAnalysis.contentAnalysis || '')}</p>
                     </div>
 
                     {/* Raw Content Data */}
-                    {contentAnalysis.rawContent && (
+                    {contentAnalysis.rawContent && typeof contentAnalysis.rawContent === 'object' && (
                       <div className="p-6 rounded-[24px] bg-gray-50 border border-gray-200">
                         <h4 className="text-lg font-semibold text-[#1A1F36] mb-4">Raw Content Data</h4>
                         <div className="space-y-3 text-sm">
-                          {contentAnalysis.rawContent.metaDescription && (
+                          {contentAnalysis.rawContent.title && typeof contentAnalysis.rawContent.title === 'string' && (
+                            <div>
+                              <span className="text-[#6B7280] font-medium">Title:</span>
+                              <p className="text-[#1A1F36] mt-1">{contentAnalysis.rawContent.title}</p>
+                            </div>
+                          )}
+                          {contentAnalysis.rawContent.metaDescription && typeof contentAnalysis.rawContent.metaDescription === 'string' && (
                             <div>
                               <span className="text-[#6B7280] font-medium">Meta Description:</span>
                               <p className="text-[#1A1F36] mt-1">{contentAnalysis.rawContent.metaDescription}</p>
                             </div>
                           )}
-                          {contentAnalysis.rawContent.h1Tags && contentAnalysis.rawContent.h1Tags.length > 0 && (
+                          {contentAnalysis.rawContent.h1Tags && Array.isArray(contentAnalysis.rawContent.h1Tags) && contentAnalysis.rawContent.h1Tags.length > 0 && (
                             <div>
                               <span className="text-[#6B7280] font-medium">H1 Tags:</span>
                               <ul className="list-disc list-inside text-[#1A1F36] mt-1 space-y-1">
                                 {contentAnalysis.rawContent.h1Tags.map((h1, index) => (
-                                  <li key={index}>{h1}</li>
+                                  <li key={index}>{typeof h1 === 'string' ? h1 : String(h1)}</li>
                                 ))}
                               </ul>
+                            </div>
+                          )}
+                          {contentAnalysis.rawContent.textContent && typeof contentAnalysis.rawContent.textContent === 'string' && (
+                            <div>
+                              <span className="text-[#6B7280] font-medium">Text Content Preview:</span>
+                              <p className="text-[#1A1F36] mt-1 line-clamp-3">{contentAnalysis.rawContent.textContent.substring(0, 200)}...</p>
                             </div>
                           )}
                         </div>

@@ -12,6 +12,8 @@ export const API_ENDPOINTS = {
   CHECK_BROKEN_LINKS: `${API_BASE_URL}/api/check-broken-links`,
   REPORTS: `${API_BASE_URL}/api/reports`,
   GET_REPORT: (reportId) => `${API_BASE_URL}/api/reports/${reportId}`,
+  SEND_EMAIL: `${API_BASE_URL}/api/send-email`,
+  SEND_CONTACT_NOTIFICATION: `${API_BASE_URL}/api/send-contact-notification`,
 };
 
 export default API_ENDPOINTS;

@@ -5,6 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
@@ -227,6 +228,101 @@ function extractLinksFromWebsite(url) {
       reject(error);
     });
   });
+}
+
+// Helper function to generate SEO improvement suggestions with AI
+async function generateSEOImprovements(analysisData) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  
+  if (!apiKey) {
+    // Return default suggestions if no API key
+    return [
+      'Optimize page loading speed by compressing images and minimizing CSS/JavaScript files',
+      'Improve mobile responsiveness and ensure touch-friendly navigation elements',
+      'Add descriptive meta tags and optimize title tags for better search engine visibility',
+      'Implement structured data (Schema.org) to help search engines understand your content',
+      'Fix broken links and ensure all internal links are working properly'
+    ];
+  }
+
+  try {
+    const { performance, accessibility, seo, bestPractices, websiteUrl } = analysisData;
+    
+    const prompt = `Based on the following website audit results, generate exactly 5 specific, actionable recommendations to improve website health and SEO. Make them practical and implementable.
+
+Website: ${websiteUrl || 'Unknown'}
+Performance Score: ${performance || 0}/100
+Accessibility Score: ${accessibility || 0}/100
+SEO Score: ${seo || 0}/100
+Best Practices Score: ${bestPractices || 0}/100
+
+Provide exactly 5 recommendations in a JSON array format:
+{
+  "suggestions": [
+    "First specific recommendation",
+    "Second specific recommendation",
+    "Third specific recommendation",
+    "Fourth specific recommendation",
+    "Fifth specific recommendation"
+  ]
+}
+
+Each recommendation should be:
+- Specific and actionable
+- Focused on improving the lowest scores
+- Practical and implementable
+- Between 10-30 words
+- Written in a clear, professional tone`;
+
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an expert SEO consultant and web performance specialist. Provide specific, actionable recommendations to improve website health and SEO based on audit scores.'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.7,
+        max_tokens: 500
+      })
+    });
+
+    const data = await response.json();
+    
+    if (data.choices && data.choices[0] && data.choices[0].message) {
+      const content = data.choices[0].message.content;
+      // Try to parse JSON from the response
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (parsed.suggestions && Array.isArray(parsed.suggestions)) {
+          return parsed.suggestions.slice(0, 5); // Ensure exactly 5
+        }
+      }
+    }
+    
+    throw new Error('Invalid response from OpenAI');
+  } catch (error) {
+    console.error('OpenAI API error for suggestions:', error);
+    // Return default suggestions on error
+    return [
+      'Optimize page loading speed by compressing images and minimizing CSS/JavaScript files',
+      'Improve mobile responsiveness and ensure touch-friendly navigation elements',
+      'Add descriptive meta tags and optimize title tags for better search engine visibility',
+      'Implement structured data (Schema.org) to help search engines understand your content',
+      'Fix broken links and ensure all internal links are working properly'
+    ];
+  }
 }
 
 // Helper function to analyze content with OpenAI
@@ -556,6 +652,584 @@ app.get('/api/reports/:reportId', (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to retrieve report',
+      message: error.message
+    });
+  }
+});
+
+// Configure SMTP transporter
+const createTransporter = () => {
+  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    return null; // SMTP not configured
+  }
+
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: parseInt(process.env.SMTP_PORT || '587'),
+    secure: process.env.SMTP_SECURE === 'true',
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS
+    },
+    // Additional options for Gmail
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+};
+
+// API endpoint to send email
+app.post('/api/send-email', async (req, res) => {
+  try {
+    const { to, name, websiteUrl, reportUrl, analysisData } = req.body;
+
+    if (!to || !name) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email and name are required'
+      });
+    }
+
+    const transporter = createTransporter();
+    if (!transporter) {
+      return res.status(503).json({
+        success: false,
+        error: 'Email service is not configured'
+      });
+    }
+
+    const fromName = process.env.SMTP_FROM_NAME || 'SitePulse Web Audit';
+    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+
+    // Generate AI-powered SEO improvement suggestions
+    let suggestions = [];
+    if (analysisData) {
+      try {
+        suggestions = await generateSEOImprovements({
+          performance: analysisData.performance || analysisData.performanceScore,
+          accessibility: analysisData.accessibility || analysisData.accessibilityScore,
+          seo: analysisData.seo || analysisData.seoScore,
+          bestPractices: analysisData.bestPractices || analysisData.bestPracticesScore,
+          websiteUrl: websiteUrl
+        });
+      } catch (error) {
+        console.error('Error generating suggestions:', error);
+        // Continue without suggestions if generation fails
+      }
+    }
+
+    // Responsive Email template
+    const emailHtml = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>Website Audit Report</title>
+        <!--[if mso]>
+        <style type="text/css">
+          body, table, td {font-family: Arial, sans-serif !important;}
+        </style>
+        <![endif]-->
+        <style type="text/css">
+          /* Reset styles */
+          body, table, td, p, a, li, blockquote {
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+          }
+          table, td {
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+          }
+          img {
+            -ms-interpolation-mode: bicubic;
+            border: 0;
+            outline: none;
+            text-decoration: none;
+          }
+          
+          /* Responsive styles */
+          @media only screen and (max-width: 600px) {
+            .container {
+              width: 100% !important;
+              max-width: 100% !important;
+            }
+            .header {
+              padding: 20px 15px !important;
+            }
+            .header h1 {
+              font-size: 24px !important;
+              line-height: 1.2 !important;
+            }
+            .content {
+              padding: 20px 15px !important;
+            }
+            .content p {
+              font-size: 14px !important;
+              line-height: 1.5 !important;
+            }
+            .feature-box {
+              padding: 15px !important;
+              margin: 15px 0 !important;
+            }
+            .feature-box h2 {
+              font-size: 18px !important;
+            }
+            .suggestions-box {
+              padding: 15px !important;
+              margin: 15px 0 !important;
+            }
+            .suggestions-box p {
+              font-size: 13px !important;
+            }
+            .button {
+              padding: 12px 30px !important;
+              font-size: 14px !important;
+              display: block !important;
+              width: auto !important;
+            }
+            .footer {
+              padding: 15px !important;
+              font-size: 11px !important;
+            }
+          }
+          
+          @media only screen and (max-width: 480px) {
+            .header h1 {
+              font-size: 20px !important;
+            }
+            .button {
+              padding: 10px 25px !important;
+              font-size: 13px !important;
+            }
+          }
+        </style>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; background-color: #f3f4f6; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;">
+        <!-- Wrapper table for email client compatibility -->
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f3f4f6;">
+          <tr>
+            <td align="center" style="padding: 20px 10px;">
+              <!-- Main container -->
+              <table role="presentation" class="container" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                
+                <!-- Header -->
+                <tr>
+                  <td class="header" style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); padding: 30px 20px; text-align: center;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: bold; line-height: 1.3;">Website Audit Report Ready!</h1>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td class="content" style="background-color: #f9fafb; padding: 30px 20px;">
+                    <p style="font-size: 16px; line-height: 1.6; color: #1A1F36; margin: 0 0 20px 0;">Hello ${name},</p>
+                    
+                    <p style="font-size: 16px; line-height: 1.6; color: #1A1F36; margin: 0 0 20px 0;">
+                      Thank you for using SitePulse Web Audit! Your comprehensive website analysis for 
+                      <strong style="color: #10B981;">${websiteUrl || 'your website'}</strong> is now ready.
+                    </p>
+                    
+                    <!-- Features Box -->
+                    <table role="presentation" class="feature-box" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #ffffff; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10B981;">
+                      <tr>
+                        <td>
+                          <h2 style="color: #1A1F36; margin: 0 0 15px 0; font-size: 20px; font-weight: bold;">What's Included:</h2>
+                          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                            <tr>
+                              <td style="padding: 5px 0;">
+                                <p style="margin: 0; color: #6B7280; font-size: 14px; line-height: 1.8;">✓ Performance Metrics & Speed Analysis</p>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 5px 0;">
+                                <p style="margin: 0; color: #6B7280; font-size: 14px; line-height: 1.8;">✓ SEO Health Check & Recommendations</p>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 5px 0;">
+                                <p style="margin: 0; color: #6B7280; font-size: 14px; line-height: 1.8;">✓ Accessibility & Mobile-Friendliness</p>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 5px 0;">
+                                <p style="margin: 0; color: #6B7280; font-size: 14px; line-height: 1.8;">✓ Content Analysis & SEO Tags</p>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 5px 0;">
+                                <p style="margin: 0; color: #6B7280; font-size: 14px; line-height: 1.8;">✓ Link Analysis & Broken Links Report</p>
+                              </td>
+                            </tr>
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    ${suggestions.length > 0 ? `
+                    <!-- AI-Generated Improvement Suggestions -->
+                    <table role="presentation" class="feature-box suggestions-box" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #fef3c7; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #f59e0b;">
+                      <tr>
+                        <td>
+                          <h2 style="color: #92400E; margin: 0 0 15px 0; font-size: 20px; font-weight: bold;">💡 AI-Powered Improvement Suggestions</h2>
+                          <p style="margin: 0 0 15px 0; color: #78350f; font-size: 14px; line-height: 1.6;">Based on your website analysis, here are 5 actionable recommendations to improve your website health and SEO:</p>
+                          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                            ${suggestions.map((suggestion, index) => `
+                            <tr>
+                              <td style="padding: 8px 0;">
+                                <p style="margin: 0; color: #78350f; font-size: 14px; line-height: 1.7;">
+                                  <strong style="color: #92400E;">${index + 1}.</strong> ${suggestion}
+                                </p>
+                              </td>
+                            </tr>
+                            `).join('')}
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    ` : ''}
+                    
+                    ${reportUrl ? `
+                    <!-- Button -->
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 30px 0;">
+                      <tr>
+                        <td align="center" style="padding: 0;">
+                          <a href="${reportUrl}" class="button" style="display: inline-block; background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: #ffffff; padding: 15px 40px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; line-height: 1.5; -webkit-text-size-adjust: none; mso-hide: all;">View Full Report</a>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <!-- Alternative text link for email clients that don't support buttons -->
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin: 15px 0;">
+                      <tr>
+                        <td align="center" style="padding: 10px 0;">
+                          <p style="margin: 0; font-size: 13px; color: #6B7280; word-break: break-all;">
+                            Or copy this link: <a href="${reportUrl}" style="color: #10B981; text-decoration: underline;">${reportUrl}</a>
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                    ` : ''}
+                    
+                    <p style="font-size: 14px; line-height: 1.6; color: #6B7280; margin: 30px 0 0 0;">
+                      If you have any questions or need assistance, feel free to reach out to our support team.
+                    </p>
+                    
+                    <p style="font-size: 14px; line-height: 1.6; color: #6B7280; margin: 20px 0 0 0;">
+                      Best regards,<br>
+                      <strong style="color: #1A1F36;">The SitePulse Team</strong>
+                    </p>
+                  </td>
+                </tr>
+                
+                <!-- Footer -->
+                <tr>
+                  <td class="footer" style="text-align: center; padding: 20px; border-top: 1px solid #e5e7eb; background-color: #ffffff;">
+                    <p style="font-size: 12px; line-height: 1.5; color: #9ca3af; margin: 0;">
+                      This email was sent to ${to}.<br>
+                      If you didn't request this report, please ignore this email.
+                    </p>
+                  </td>
+                </tr>
+                
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const emailText = `
+Hello ${name},
+
+Thank you for using SitePulse Web Audit! Your comprehensive website analysis for ${websiteUrl || 'your website'} is now ready.
+
+What's Included:
+- Performance Metrics & Speed Analysis
+- SEO Health Check & Recommendations
+- Accessibility & Mobile-Friendliness
+- Content Analysis & SEO Tags
+- Link Analysis & Broken Links Report
+
+${suggestions.length > 0 ? `
+AI-Powered Improvement Suggestions:
+${suggestions.map((suggestion, index) => `${index + 1}. ${suggestion}`).join('\n')}
+
+` : ''}
+
+${reportUrl ? `
+View your full report here:
+${reportUrl}
+
+Click the link above or copy and paste it into your browser to view your complete website audit report.
+` : ''}
+
+If you have any questions or need assistance, feel free to reach out to our support team.
+
+Best regards,
+The SitePulse Team
+    `;
+
+    const mailOptions = {
+      from: `"${fromName}" <${fromEmail}>`,
+      to: to,
+      subject: `Your Website Audit Report for ${websiteUrl || 'Your Website'} is Ready!`,
+      text: emailText,
+      html: emailHtml
+    };
+
+    await transporter.sendMail(mailOptions);
+
+    console.log('Email sent successfully to:', to);
+    res.json({
+      success: true,
+      message: 'Email sent successfully'
+    });
+  } catch (error) {
+    console.error('Error sending email:', error);
+    
+    // Provide helpful error messages for common Gmail issues
+    let errorMessage = error.message;
+    if (error.code === 'EAUTH') {
+      if (error.response && error.response.includes('WebLoginRequired')) {
+        errorMessage = 'Gmail authentication failed. Please ensure:\n' +
+          '1. 2-Step Verification is enabled on your Google account\n' +
+          '2. You are using an App Password (not your regular password)\n' +
+          '3. Generate a new App Password at: https://myaccount.google.com/apppasswords';
+      } else {
+        errorMessage = 'Email authentication failed. Please check your SMTP credentials in .env file.';
+      }
+    }
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send email',
+      message: errorMessage,
+      code: error.code || 'UNKNOWN'
+    });
+  }
+});
+
+// API endpoint to send contact details to company email
+app.post('/api/send-contact-notification', async (req, res) => {
+  try {
+    const { name, email, company, phone, websiteUrl } = req.body;
+
+    if (!name || !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Name and email are required'
+      });
+    }
+
+    const companyEmailConfig = process.env.COMPANY_EMAIL;
+    if (!companyEmailConfig) {
+      // If company email not configured, just log and return success
+      console.log('Company email not configured. Contact details:', { name, email, company, phone, websiteUrl });
+      return res.json({
+        success: true,
+        message: 'Contact details logged (company email not configured)'
+      });
+    }
+
+    // Parse company emails (support single email or comma-separated list)
+    const companyEmails = companyEmailConfig
+      .split(',')
+      .map(email => email.trim())
+      .filter(email => email.length > 0);
+    
+    if (companyEmails.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No valid company emails configured'
+      });
+    }
+
+    const transporter = createTransporter();
+    if (!transporter) {
+      return res.status(503).json({
+        success: false,
+        error: 'Email service is not configured'
+      });
+    }
+
+    const fromName = process.env.SMTP_FROM_NAME || 'SitePulse Web Audit';
+    const fromEmail = process.env.SMTP_FROM_EMAIL || process.env.SMTP_USER;
+
+    // Company notification email template
+    const contactEmailHtml = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>New Lead - Website Audit Request</title>
+        <style type="text/css">
+          body, table, td, p, a, li, blockquote {
+            -webkit-text-size-adjust: 100%;
+            -ms-text-size-adjust: 100%;
+          }
+          table, td {
+            mso-table-lspace: 0pt;
+            mso-table-rspace: 0pt;
+          }
+          @media only screen and (max-width: 600px) {
+            .container {
+              width: 100% !important;
+              max-width: 100% !important;
+            }
+            .content {
+              padding: 20px 15px !important;
+            }
+          }
+        </style>
+      </head>
+      <body style="margin: 0; padding: 0; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif; background-color: #f3f4f6;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f3f4f6;">
+          <tr>
+            <td align="center" style="padding: 20px 10px;">
+              <table role="presentation" class="container" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #10B981 0%, #059669 100%); padding: 30px 20px; text-align: center;">
+                    <h1 style="color: #ffffff; margin: 0; font-size: 24px; font-weight: bold;">🎯 New Lead - Website Audit Request</h1>
+                  </td>
+                </tr>
+                
+                <!-- Content -->
+                <tr>
+                  <td class="content" style="background-color: #f9fafb; padding: 30px 20px;">
+                    <p style="font-size: 16px; line-height: 1.6; color: #1A1F36; margin: 0 0 20px 0;">A new user has requested a website audit. Contact details below:</p>
+                    
+                    <!-- Contact Details Box -->
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #ffffff; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #10B981;">
+                      <tr>
+                        <td>
+                          <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
+                            <tr>
+                              <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                                <strong style="color: #1A1F36; font-size: 14px;">Name:</strong>
+                                <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 14px;">${name}</p>
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                                <strong style="color: #1A1F36; font-size: 14px;">Email:</strong>
+                                <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 14px;"><a href="mailto:${email}" style="color: #10B981; text-decoration: none;">${email}</a></p>
+                              </td>
+                            </tr>
+                            ${company ? `
+                            <tr>
+                              <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                                <strong style="color: #1A1F36; font-size: 14px;">Company:</strong>
+                                <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 14px;">${company}</p>
+                              </td>
+                            </tr>
+                            ` : ''}
+                            ${phone ? `
+                            <tr>
+                              <td style="padding: 10px 0; border-bottom: 1px solid #e5e7eb;">
+                                <strong style="color: #1A1F36; font-size: 14px;">Phone:</strong>
+                                <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 14px;"><a href="tel:${phone}" style="color: #10B981; text-decoration: none;">${phone}</a></p>
+                              </td>
+                            </tr>
+                            ` : ''}
+                            ${websiteUrl ? `
+                            <tr>
+                              <td style="padding: 10px 0;">
+                                <strong style="color: #1A1F36; font-size: 14px;">Website URL:</strong>
+                                <p style="margin: 5px 0 0 0; color: #6B7280; font-size: 14px;"><a href="${websiteUrl}" target="_blank" style="color: #10B981; text-decoration: none; word-break: break-all;">${websiteUrl}</a></p>
+                              </td>
+                            </tr>
+                            ` : ''}
+                          </table>
+                        </td>
+                      </tr>
+                    </table>
+                    
+                    <p style="font-size: 14px; line-height: 1.6; color: #6B7280; margin: 20px 0 0 0;">
+                      <strong>Next Steps:</strong><br>
+                      Follow up with this lead to discuss their website audit results and potential services.
+                    </p>
+                    
+                    <p style="font-size: 12px; line-height: 1.6; color: #9ca3af; margin: 20px 0 0 0;">
+                      This notification was automatically generated from the SitePulse Web Audit system.
+                    </p>
+                  </td>
+                </tr>
+                
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `;
+
+    const contactEmailText = `
+New Lead - Website Audit Request
+
+A new user has requested a website audit. Contact details:
+
+Name: ${name}
+Email: ${email}
+${company ? `Company: ${company}` : ''}
+${phone ? `Phone: ${phone}` : ''}
+${websiteUrl ? `Website URL: ${websiteUrl}` : ''}
+
+Next Steps:
+Follow up with this lead to discuss their website audit results and potential services.
+
+This notification was automatically generated from the SitePulse Web Audit system.
+    `;
+
+    // Send email to all company email addresses
+    const emailPromises = companyEmails.map(async (companyEmail) => {
+      const mailOptions = {
+        from: `"${fromName}" <${fromEmail}>`,
+        to: companyEmail,
+        subject: `🎯 New Lead: ${name} - Website Audit Request for ${websiteUrl || 'Website'}`,
+        text: contactEmailText,
+        html: contactEmailHtml
+      };
+
+      try {
+        await transporter.sendMail(mailOptions);
+        console.log('Contact notification sent to company email:', companyEmail);
+        return { email: companyEmail, success: true };
+      } catch (error) {
+        console.error(`Error sending to ${companyEmail}:`, error);
+        return { email: companyEmail, success: false, error: error.message };
+      }
+    });
+
+    const results = await Promise.allSettled(emailPromises);
+    const successful = results.filter(r => r.status === 'fulfilled' && r.value.success).length;
+    const failed = results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && !r.value.success)).length;
+
+    if (successful > 0) {
+      res.json({
+        success: true,
+        message: `Contact notification sent to ${successful} of ${companyEmails.length} company email(s)`,
+        sentTo: companyEmails,
+        successful,
+        failed
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'Failed to send contact notification to any company email',
+        attempted: companyEmails
+      });
+    }
+  } catch (error) {
+    console.error('Error sending contact notification:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to send contact notification',
       message: error.message
     });
   }
